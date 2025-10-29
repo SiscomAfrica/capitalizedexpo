@@ -1,6 +1,6 @@
 import { useCustomFonts } from '@/hooks/use-fonts';
 import { Ionicons } from '@expo/vector-icons';
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
     Alert,
     ScrollView,
@@ -10,10 +10,12 @@ import {
     TextInput,
     TouchableOpacity,
     View,
+    ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useAuthStore } from '@/stores/auth.store';
 
-// Decorative pattern component for top right (same as signup)
+// Decorative pattern component for top right
 const DecorativePattern = () => {
   const squares = [
     { size: 20, top: 20, right: 20, opacity: 0.8 },
@@ -53,33 +55,80 @@ interface LoginScreenProps {
   onBack: () => void;
   onCreateAccountPress: () => void;
   onLoginSuccess: () => void;
+  onProfileCompletionNeeded: () => void;
 }
 
-export default function LoginScreen({ onBack, onCreateAccountPress, onLoginSuccess }: LoginScreenProps) {
+export default function LoginScreen({ 
+  onBack, 
+  onCreateAccountPress, 
+  onLoginSuccess,
+  onProfileCompletionNeeded 
+}: LoginScreenProps) {
   const fontsLoaded = useCustomFonts();
+  const [step, setStep] = useState<'email' | 'code'>('email');
   const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
-  const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const [code, setCode] = useState(['', '', '', '', '', '']);
+  const codeInputRefs = useRef<(TextInput | null)[]>([]);
+  
+  const { login, verifyCode, isLoading, error, clearError } = useAuthStore();
 
-  const handleLogin = () => {
-    if (!email || !password) {
-      Alert.alert('Error', 'Please fill in all fields');
+  useEffect(() => {
+    clearError();
+  }, [step]);
+
+  const handleSendCode = async () => {
+    if (!email || !email.includes('@')) {
+      Alert.alert('Error', 'Please enter a valid email address');
       return;
     }
-    
-    setIsLoggingIn(true);
-    console.log('Logging in with:', { email, password });
-    // In a real app, you would validate credentials with your backend here
-    // For now, we'll just simulate a successful login and navigate directly
-    setTimeout(() => {
-      setIsLoggingIn(false);
-      onLoginSuccess();
-    }, 1000); // Small delay to simulate network request
+
+    const result = await login(email);
+    if (result.success) {
+      setStep('code');
+      Alert.alert('Success', result.message);
+    } else {
+      Alert.alert('Error', result.message);
+    }
   };
 
-  const handleForgotPassword = () => {
-    Alert.alert('Forgot Password', 'Password reset functionality coming soon!');
+  const handleVerifyCode = async () => {
+    const fullCode = code.join('');
+    if (fullCode.length !== 6) {
+      Alert.alert('Error', 'Please enter the complete 6-digit code');
+      return;
+    }
+
+    const result = await verifyCode(email, fullCode);
+    
+    if (result.success) {
+      if (result.needsProfile) {
+        onProfileCompletionNeeded();
+      } else {
+        onLoginSuccess();
+      }
+    } else {
+      Alert.alert('Error', error || 'Invalid verification code');
+    }
+  };
+
+  const handleCodeInput = (text: string, index: number) => {
+    if (text.length > 1) {
+      text = text.slice(0, 1);
+    }
+
+    const newCode = [...code];
+    newCode[index] = text;
+    setCode(newCode);
+
+    if (text && index < 5) {
+      codeInputRefs.current[index + 1]?.focus();
+    }
+  };
+
+  const handleKeyPress = (e: any, index: number) => {
+    if (e.nativeEvent.key === 'Backspace' && !code[index] && index > 0) {
+      codeInputRefs.current[index - 1]?.focus();
+    }
   };
 
   if (!fontsLoaded) {
@@ -94,87 +143,116 @@ export default function LoginScreen({ onBack, onCreateAccountPress, onLoginSucce
       <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
         {/* Header */}
         <View style={styles.header}>
-          <TouchableOpacity style={styles.backButton} onPress={onBack}>
+          <TouchableOpacity 
+            style={styles.backButton} 
+            onPress={() => {
+              if (step === 'code') {
+                setStep('email');
+                setCode(['', '', '', '', '', '']);
+              } else {
+                onBack();
+              }
+            }}
+          >
             <Ionicons name="chevron-back" size={24} color="#000000" />
           </TouchableOpacity>
         </View>
 
         {/* Content */}
         <View style={styles.content}>
-          <Text style={styles.headerText}>Log in</Text>
+          <Text style={styles.headerText}>
+            {step === 'email' ? 'Log in' : 'Verify Code'}
+          </Text>
           
           <View style={styles.brandContainer}>
             <Text style={styles.brandText}>SISCOM CAPITALIZED</Text>
           </View>
 
           <Text style={styles.descriptionText}>
-            If you've purchased a SISCOM Conference 2025 ticket, use the same email address and password below.
+            {step === 'email' 
+              ? 'Enter your email address to receive a verification code'
+              : 'Enter the 6-digit code sent to your email'
+            }
           </Text>
 
-          {/* Form */}
-          <View style={styles.form}>
-            {/* Email Field */}
-            <View style={styles.inputContainer}>
-              <Text style={styles.label}>Email address</Text>
-              <TextInput
-                style={styles.input}
-                value={email}
-                onChangeText={setEmail}
-                placeholder="email@gmail.com"
-                placeholderTextColor="#999999"
-                keyboardType="email-address"
-                autoCapitalize="none"
-                autoComplete="email"
-              />
-            </View>
-
-            {/* Password Field */}
-            <View style={styles.inputContainer}>
-              <Text style={styles.label}>Password</Text>
-              <View style={styles.passwordContainer}>
+          {/* Email Step */}
+          {step === 'email' && (
+            <View style={styles.form}>
+              <View style={styles.inputContainer}>
+                <Text style={styles.label}>Email address</Text>
                 <TextInput
-                  style={styles.passwordInput}
-                  value={password}
-                  onChangeText={setPassword}
-                  placeholder="••••••••••"
+                  style={styles.input}
+                  value={email}
+                  onChangeText={setEmail}
+                  placeholder="email@gmail.com"
                   placeholderTextColor="#999999"
-                  secureTextEntry={!showPassword}
+                  keyboardType="email-address"
                   autoCapitalize="none"
+                  autoComplete="email"
+                  editable={!isLoading}
                 />
-                <TouchableOpacity
-                  style={styles.eyeIcon}
-                  onPress={() => setShowPassword(!showPassword)}
-                >
-                  <Ionicons
-                    name={showPassword ? 'eye-off' : 'eye'}
-                    size={20}
-                    color="#666666"
-                  />
-                </TouchableOpacity>
               </View>
             </View>
+          )}
 
-            {/* Forgot Password Link */}
-            <TouchableOpacity 
-              style={styles.forgotPasswordContainer}
-              onPress={handleForgotPassword}
-            >
-              <Text style={styles.forgotPasswordText}>Forgot password?</Text>
-            </TouchableOpacity>
-          </View>
+          {/* Code Verification Step */}
+          {step === 'code' && (
+            <View style={styles.form}>
+              <View style={styles.codeContainer}>
+                {code.map((digit, index) => (
+                  <TextInput
+                    key={index}
+                    ref={(ref: TextInput | null) => {
+                      codeInputRefs.current[index] = ref;
+                    }}
+                    style={[styles.codeInput, digit && styles.codeInputFilled]}
+                    value={digit}
+                    onChangeText={(text) => handleCodeInput(text, index)}
+                    onKeyPress={(e) => handleKeyPress(e, index)}
+                    keyboardType="number-pad"
+                    maxLength={1}
+                    selectTextOnFocus
+                    editable={!isLoading}
+                  />
+                ))}
+              </View>
+
+              <TouchableOpacity 
+                style={styles.resendContainer}
+                onPress={() => {
+                  setStep('email');
+                  setCode(['', '', '', '', '', '']);
+                }}
+              >
+                <Text style={styles.resendText}>Change email or resend code</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {/* Error Message */}
+          {error && (
+            <View style={styles.errorContainer}>
+              <Ionicons name="alert-circle" size={20} color="#EF4444" />
+              <Text style={styles.errorText}>{error}</Text>
+            </View>
+          )}
         </View>
       </ScrollView>
 
       {/* Bottom Section */}
       <View style={styles.bottomSection}>
         <TouchableOpacity 
-          style={[styles.loginButton, isLoggingIn && styles.loginButtonDisabled]} 
-          onPress={handleLogin}
-          disabled={isLoggingIn}
+          style={[styles.loginButton, isLoading && styles.loginButtonDisabled]} 
+          onPress={step === 'email' ? handleSendCode : handleVerifyCode}
+          disabled={isLoading}
         >
-          <Text style={styles.loginButtonText}>
-            {isLoggingIn ? 'LOGGING IN...' : 'LOG IN'}
-          </Text>
+          {isLoading ? (
+            <ActivityIndicator color="#000000" />
+          ) : (
+            <Text style={styles.loginButtonText}>
+              {step === 'email' ? 'SEND CODE' : 'VERIFY & LOG IN'}
+            </Text>
+          )}
         </TouchableOpacity>
 
         <TouchableOpacity style={styles.createAccountLink} onPress={onCreateAccountPress}>
@@ -273,32 +351,52 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     paddingHorizontal: 0,
   },
-  passwordContainer: {
+  codeContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 8,
+    marginBottom: 24,
+  },
+  codeInput: {
+    flex: 1,
+    height: 56,
+    backgroundColor: '#F5F5F5',
+    borderWidth: 2,
+    borderColor: '#E5E7EB',
+    borderRadius: 8,
+    fontSize: 24,
+    fontWeight: '700',
+    textAlign: 'center',
+    fontFamily: 'Poppins_700Bold',
+  },
+  codeInputFilled: {
+    borderColor: '#A3E635',
+    backgroundColor: '#FFFFFF',
+  },
+  resendContainer: {
+    alignSelf: 'center',
+  },
+  resendText: {
+    fontSize: 14,
+    color: '#A3E635',
+    fontWeight: '600',
+    fontFamily: 'Poppins_600SemiBold',
+    textDecorationLine: 'underline',
+  },
+  errorContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    borderBottomWidth: 1,
-    borderBottomColor: '#CCCCCC',
+    gap: 8,
+    backgroundColor: '#FEF2F2',
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 20,
   },
-  passwordInput: {
+  errorText: {
     flex: 1,
-    fontSize: 16,
+    fontSize: 14,
+    color: '#EF4444',
     fontFamily: 'Poppins_400Regular',
-    color: '#000000',
-    paddingVertical: 12,
-    paddingHorizontal: 0,
-  },
-  eyeIcon: {
-    padding: 8,
-  },
-  forgotPasswordContainer: {
-    alignItems: 'flex-end',
-    marginTop: 15,
-  },
-  forgotPasswordText: {
-    fontSize: 16,
-    fontFamily: 'Poppins_400Regular',
-    color: '#000000',
-    textDecorationLine: 'underline',
   },
   bottomSection: {
     paddingHorizontal: 24,
@@ -306,7 +404,7 @@ const styles = StyleSheet.create({
     paddingTop: 20,
   },
   loginButton: {
-    backgroundColor: '#E5E5E5', // Gray button like in reference
+    backgroundColor: '#E5E5E5',
     paddingVertical: 20,
     borderRadius: 6,
     alignItems: 'center',
@@ -333,7 +431,7 @@ const styles = StyleSheet.create({
     color: '#000000',
   },
   createAccountAccent: {
-    color: '#A3E635', // Green accent like reference
+    color: '#A3E635',
     fontFamily: 'Poppins_600SemiBold',
     fontWeight: '600',
   },

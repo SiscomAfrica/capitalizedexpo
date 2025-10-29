@@ -1,6 +1,6 @@
 import { useCustomFonts } from '@/hooks/use-fonts';
 import { Ionicons } from '@expo/vector-icons';
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
     Alert,
     ScrollView,
@@ -10,8 +10,10 @@ import {
     TextInput,
     TouchableOpacity,
     View,
+    ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useAuthStore } from '@/stores/auth.store';
 
 // Decorative pattern component for top right
 const DecorativePattern = () => {
@@ -55,32 +57,79 @@ interface SignupScreenProps {
   onAccountCreated: () => void;
 }
 
-export default function SignupScreen({ onBack, onLoginPress, onAccountCreated }: SignupScreenProps) {
+export default function SignupScreen({ 
+  onBack, 
+  onLoginPress, 
+  onAccountCreated 
+}: SignupScreenProps) {
   const fontsLoaded = useCustomFonts();
+  const [step, setStep] = useState<'email' | 'code'>('email');
   const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
-  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
-  const [agreeToTerms, setAgreeToTerms] = useState(true);
+  const [code, setCode] = useState(['', '', '', '', '', '']);
+  const [agreeToTerms, setAgreeToTerms] = useState(false);
+  const codeInputRefs = useRef<(TextInput | null)[]>([]);
 
-  const handleCreateAccount = () => {
-    if (!email || !password || !confirmPassword) {
-      Alert.alert('Error', 'Please fill in all fields');
+  const { register, verifyCode, isLoading, error, clearError } = useAuthStore();
+
+  useEffect(() => {
+    clearError();
+  }, [step]);
+
+  const handleSendCode = async () => {
+    if (!email || !email.includes('@')) {
+      Alert.alert('Error', 'Please enter a valid email address');
       return;
     }
-    if (password !== confirmPassword) {
-      Alert.alert('Error', 'Passwords do not match');
-      return;
-    }
+
     if (!agreeToTerms) {
       Alert.alert('Error', 'Please agree to the terms and conditions');
       return;
     }
+
+    const result = await register(email);
+    if (result.success) {
+      setStep('code');
+      Alert.alert('Success', result.message);
+    } else {
+      Alert.alert('Error', result.message);
+    }
+  };
+
+  const handleVerifyCode = async () => {
+    const fullCode = code.join('');
+    if (fullCode.length !== 6) {
+      Alert.alert('Error', 'Please enter the complete 6-digit code');
+      return;
+    }
+
+    const result = await verifyCode(email, fullCode);
     
-    console.log('Creating account with:', { email, password });
-    // Navigate to profile setup instead of showing alert
-    onAccountCreated();
+    if (result.success) {
+      // New users always need to complete profile
+      onAccountCreated();
+    } else {
+      Alert.alert('Error', error || 'Invalid verification code');
+    }
+  };
+
+  const handleCodeInput = (text: string, index: number) => {
+    if (text.length > 1) {
+      text = text.slice(0, 1);
+    }
+
+    const newCode = [...code];
+    newCode[index] = text;
+    setCode(newCode);
+
+    if (text && index < 5) {
+      codeInputRefs.current[index + 1]?.focus();
+    }
+  };
+
+  const handleKeyPress = (e: any, index: number) => {
+    if (e.nativeEvent.key === 'Backspace' && !code[index] && index > 0) {
+      codeInputRefs.current[index - 1]?.focus();
+    }
   };
 
   if (!fontsLoaded) {
@@ -95,118 +144,136 @@ export default function SignupScreen({ onBack, onLoginPress, onAccountCreated }:
       <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
         {/* Header */}
         <View style={styles.header}>
-          <TouchableOpacity style={styles.backButton} onPress={onBack}>
+          <TouchableOpacity 
+            style={styles.backButton} 
+            onPress={() => {
+              if (step === 'code') {
+                setStep('email');
+                setCode(['', '', '', '', '', '']);
+              } else {
+                onBack();
+              }
+            }}
+          >
             <Ionicons name="chevron-back" size={24} color="#000000" />
           </TouchableOpacity>
         </View>
 
         {/* Content */}
         <View style={styles.content}>
-          <Text style={styles.headerText}>Create account</Text>
+          <Text style={styles.headerText}>
+            {step === 'email' ? 'Create account' : 'Verify Code'}
+          </Text>
           
           <View style={styles.brandContainer}>
             <Text style={styles.brandText}>SISCOM CAPITALIZED</Text>
           </View>
 
           <Text style={styles.descriptionText}>
-            If you've purchased a SISCOM Conference 2025 ticket, use the same email address and password below.
+            {step === 'email' 
+              ? 'Enter your email address to get started. You\'ll receive a verification code to continue.'
+              : 'Enter the 6-digit code sent to your email'
+            }
           </Text>
 
-          {/* Form */}
-          <View style={styles.form}>
-            {/* Email Field */}
-            <View style={styles.inputContainer}>
-              <Text style={styles.label}>Email address</Text>
-              <TextInput
-                style={styles.input}
-                value={email}
-                onChangeText={setEmail}
-                placeholder="email@gmail.com"
-                placeholderTextColor="#999999"
-                keyboardType="email-address"
-                autoCapitalize="none"
-                autoComplete="email"
-              />
-            </View>
-
-            {/* Password Field */}
-            <View style={styles.inputContainer}>
-              <Text style={styles.label}>Password</Text>
-              <View style={styles.passwordContainer}>
+          {/* Email Step */}
+          {step === 'email' && (
+            <View style={styles.form}>
+              <View style={styles.inputContainer}>
+                <Text style={styles.label}>Email address</Text>
                 <TextInput
-                  style={styles.passwordInput}
-                  value={password}
-                  onChangeText={setPassword}
-                  placeholder="Password"
+                  style={styles.input}
+                  value={email}
+                  onChangeText={setEmail}
+                  placeholder="email@gmail.com"
                   placeholderTextColor="#999999"
-                  secureTextEntry={!showPassword}
+                  keyboardType="email-address"
                   autoCapitalize="none"
+                  autoComplete="email"
+                  editable={!isLoading}
                 />
+              </View>
+
+              {/* Terms Checkbox */}
+              <View style={styles.termsContainer}>
                 <TouchableOpacity
-                  style={styles.eyeIcon}
-                  onPress={() => setShowPassword(!showPassword)}
+                  style={styles.checkbox}
+                  onPress={() => setAgreeToTerms(!agreeToTerms)}
                 >
-                  <Ionicons
-                    name={showPassword ? 'eye-off' : 'eye'}
-                    size={20}
-                    color="#666666"
-                  />
+                  <View style={[styles.checkboxInner, agreeToTerms && styles.checkboxChecked]}>
+                    {agreeToTerms && (
+                      <Ionicons name="checkmark" size={16} color="#FFFFFF" />
+                    )}
+                  </View>
                 </TouchableOpacity>
+                <Text style={styles.termsText}>
+                  By creating an account you agree to our{' '}
+                  <Text style={styles.linkText}>Terms of Service</Text>,{' '}
+                  <Text style={styles.linkText}>Privacy Policy</Text>, and default{' '}
+                  <Text style={styles.linkText}>Notification Settings</Text>.
+                </Text>
               </View>
             </View>
+          )}
 
-            {/* Confirm Password Field */}
-            <View style={styles.inputContainer}>
-              <Text style={styles.label}>Confirm password</Text>
-              <View style={styles.passwordContainer}>
-                <TextInput
-                  style={styles.passwordInput}
-                  value={confirmPassword}
-                  onChangeText={setConfirmPassword}
-                  placeholder="Confirm password"
-                  secureTextEntry={!showConfirmPassword}
-                  autoCapitalize="none"
-                />
-                <TouchableOpacity
-                  style={styles.eyeIcon}
-                  onPress={() => setShowConfirmPassword(!showConfirmPassword)}
-                >
-                  <Ionicons
-                    name={showConfirmPassword ? 'eye-off' : 'eye'}
-                    size={20}
-                    color="#666666"
+          {/* Code Verification Step */}
+          {step === 'code' && (
+            <View style={styles.form}>
+              <View style={styles.codeContainer}>
+                {code.map((digit, index) => (
+                  <TextInput
+                    key={index}
+                    ref={(ref: TextInput | null) => {
+                      codeInputRefs.current[index] = ref;
+                    }}
+                    style={[styles.codeInput, digit && styles.codeInputFilled]}
+                    value={digit}
+                    onChangeText={(text) => handleCodeInput(text, index)}
+                    onKeyPress={(e) => handleKeyPress(e, index)}
+                    keyboardType="number-pad"
+                    maxLength={1}
+                    selectTextOnFocus
+                    editable={!isLoading}
                   />
-                </TouchableOpacity>
+                ))}
               </View>
-            </View>
 
-            {/* Terms Checkbox */}
-            <View style={styles.termsContainer}>
-              <TouchableOpacity
-                style={styles.checkbox}
-                onPress={() => setAgreeToTerms(!agreeToTerms)}
+              <TouchableOpacity 
+                style={styles.resendContainer}
+                onPress={() => {
+                  setStep('email');
+                  setCode(['', '', '', '', '', '']);
+                }}
               >
-                <Ionicons
-                  name={agreeToTerms ? 'checkmark' : 'square-outline'}
-                  size={20}
-                  color={agreeToTerms ? '#FFFFFF' : '#A3E635'}
-                />
+                <Text style={styles.resendText}>Change email or resend code</Text>
               </TouchableOpacity>
-              <Text style={styles.termsText}>
-                By creating an account you agree to our{' '}
-                <Text style={styles.linkText}>Terms of Service</Text>,{' '}
-                <Text style={styles.linkText}>Privacy Policy</Text>, and default{' '}
-                <Text style={styles.linkText}>Notification Settings</Text>.
-              </Text>
             </View>
-          </View>
+          )}
+
+          {/* Error Message */}
+          {error && (
+            <View style={styles.errorContainer}>
+              <Ionicons name="alert-circle" size={20} color="#EF4444" />
+              <Text style={styles.errorText}>{error}</Text>
+            </View>
+          )}
         </View>
       </ScrollView>
 
       {/* Bottom Section */}
       <View style={styles.bottomSection}>
-        <TouchableOpacity style={styles.createButton} onPress={handleCreateAccount}>
-          <Text style={styles.createButtonText}>CREATE ACCOUNT</Text>
+        <TouchableOpacity 
+          style={[styles.createButton, isLoading && styles.createButtonDisabled]} 
+          onPress={step === 'email' ? handleSendCode : handleVerifyCode}
+          disabled={isLoading}
+        >
+          {isLoading ? (
+            <ActivityIndicator color="#000000" />
+          ) : (
+            <Text style={styles.createButtonText}>
+              {step === 'email' ? 'SEND CODE' : 'VERIFY & CONTINUE'}
+            </Text>
+          )}
         </TouchableOpacity>
 
         <TouchableOpacity style={styles.loginLink} onPress={onLoginPress}>
@@ -304,22 +371,37 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     paddingHorizontal: 0,
   },
-  passwordContainer: {
+  codeContainer: {
     flexDirection: 'row',
-    alignItems: 'center',
-    borderBottomWidth: 1,
-    borderBottomColor: '#CCCCCC',
+    justifyContent: 'space-between',
+    gap: 8,
+    marginBottom: 24,
   },
-  passwordInput: {
+  codeInput: {
     flex: 1,
-    fontSize: 16,
-    fontFamily: 'Poppins_400Regular',
-    color: '#000000',
-    paddingVertical: 12,
-    paddingHorizontal: 0,
+    height: 56,
+    backgroundColor: '#F5F5F5',
+    borderWidth: 2,
+    borderColor: '#E5E7EB',
+    borderRadius: 8,
+    fontSize: 24,
+    fontWeight: '700',
+    textAlign: 'center',
+    fontFamily: 'Poppins_700Bold',
   },
-  eyeIcon: {
-    padding: 8,
+  codeInputFilled: {
+    borderColor: '#A3E635',
+    backgroundColor: '#FFFFFF',
+  },
+  resendContainer: {
+    alignSelf: 'center',
+  },
+  resendText: {
+    fontSize: 14,
+    color: '#A3E635',
+    fontWeight: '600',
+    fontFamily: 'Poppins_600SemiBold',
+    textDecorationLine: 'underline',
   },
   termsContainer: {
     flexDirection: 'row',
@@ -327,14 +409,21 @@ const styles = StyleSheet.create({
     marginTop: 20,
   },
   checkbox: {
+    marginRight: 12,
+    marginTop: 2,
+  },
+  checkboxInner: {
     width: 24,
     height: 24,
     borderRadius: 4,
-    backgroundColor: '#A3E635',
+    borderWidth: 2,
+    borderColor: '#A3E635',
+    backgroundColor: '#FFFFFF',
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 12,
-    marginTop: 2,
+  },
+  checkboxChecked: {
+    backgroundColor: '#A3E635',
   },
   termsText: {
     flex: 1,
@@ -347,6 +436,21 @@ const styles = StyleSheet.create({
     color: '#A3E635',
     textDecorationLine: 'underline',
   },
+  errorContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#FEF2F2',
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 20,
+  },
+  errorText: {
+    flex: 1,
+    fontSize: 14,
+    color: '#EF4444',
+    fontFamily: 'Poppins_400Regular',
+  },
   bottomSection: {
     paddingHorizontal: 24,
     paddingBottom: 34,
@@ -358,6 +462,10 @@ const styles = StyleSheet.create({
     borderRadius: 6,
     alignItems: 'center',
     marginBottom: 20,
+  },
+  createButtonDisabled: {
+    backgroundColor: '#CCCCCC',
+    opacity: 0.7,
   },
   createButtonText: {
     fontSize: 16,

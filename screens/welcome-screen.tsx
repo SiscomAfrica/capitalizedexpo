@@ -109,6 +109,10 @@ export default function WelcomeScreen({ onNavigateToHome }: WelcomeScreenProps =
             onNavigateToHome();
           }
         }}
+        onProfileCompletionNeeded={() => {
+          console.log('Profile completion needed');
+          setCurrentScreen('profile-setup');
+        }}
       />
     );
   }
